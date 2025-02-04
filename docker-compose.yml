@@ -1,0 +1,81 @@
+version: '3.1'
+
+services:
+  openvidu-server:
+    image: openvidu/openvidu-server:2.29.0
+    container_name: openvidu-server
+    restart: on-failure
+    network_mode: host
+    entrypoint: ['/usr/local/bin/entrypoint.sh']
+    volumes:
+      - ./config:/config
+      - ./recordings:/opt/openvidu/recordings
+      - ./logs:/opt/openvidu/logs
+    env_file:
+      - .env
+    environment:
+      - OPENVIDU_RECORDING=true
+      - OPENVIDU_RECORDING_PATH=/opt/openvidu/recordings
+      - OPENVIDU_RECORDING_PUBLIC_ACCESS=false
+      - DOMAIN_OR_PUBLIC_IP=localhost
+      - OPENVIDU_SECRET=MY_SECRET
+      - CERTIFICATE_TYPE=selfsigned
+      - OPENVIDU_CDR=true
+      - OPENVIDU_WEBHOOK=true
+      - OPENVIDU_WEBHOOK_ENDPOINT=http://permission-server:5000/webhook
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5443/openvidu/api"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  permission-server:
+    build: 
+      context: ./permission-server
+      dockerfile: Dockerfile
+    container_name: permission-server
+    restart: on-failure
+    environment:
+      - OPENVIDU_SECRET=MY_SECRET
+    ports:
+      - "5000:5000"
+    depends_on:
+      - openvidu-server
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  coturn:
+    image: openvidu/openvidu-coturn:2.29.0
+    container_name: openvidu-coturn
+    restart: on-failure
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ./coturn:/opt/openvidu/coturn
+    healthcheck:
+      test: ["CMD", "turnserver", "-h"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  nginx:
+    image: openvidu/openvidu-proxy:2.29.0
+    container_name: openvidu-proxy
+    restart: on-failure
+    network_mode: host
+    volumes:
+      - ./certificates:/etc/letsencrypt
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    environment:
+      - PROXY_MODE=CE
+      - CERTIFICATE_TYPE=selfsigned
+      - DOMAIN_OR_PUBLIC_IP=localhost
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
