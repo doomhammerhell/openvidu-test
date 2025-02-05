@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenVidu Broadcast Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/openvidu-browser@2.28.0/static/js/openvidu-browser-2.28.0.min.js"></script>
+    <style>
+        #video-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            margin-bottom: 20px;
+        }
+        video {
+            width: 100%;
+        }
+        #log {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            min-height: 100px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <div id="video-container"></div>
+    <button id="start">Start Broadcasting</button>
+    <button id="watch">Watch Stream</button>
+    <div id="log"></div>
+
+    <script>
+        let OV;
+        let session;
+        let sessionId;
+
+        function log(message, isError = false) {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            entry.className = isError ? 'error' : 'success';
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        async function initializeSession() {
+            try {
+                log('Criando nova sessão...');
+                const response = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (!data.sessionId) {
+                    throw new Error('Sessão ID não recebido do servidor');
+                }
+
+                sessionId = data.sessionId;
+                log(`Sessão criada com ID: ${sessionId}`);
+                return sessionId;
+            } catch (error) {
+                log(`Erro ao criar sessão: ${error.message}`, true);
+                throw error;
+            }
+        }
+
+        async function getToken(sessionId, role) {
+            try {
+                log(`Obtendo token para ${role}...`);
+                const response = await fetch(`/api/sessions/${sessionId}/connections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                if (!data.token) {
+                    throw new Error('Token não recebido do servidor');
+                }
+
+                log('Token obtido com sucesso');
+                return data.token;
+            } catch (error) {
+                log(`Erro ao obter token: ${error.message}`, true);
+                throw error;
+            }
+        }
+
+        document.getElementById('start').addEventListener('click', async () => {
+            try {
+                OV = new OpenVidu();
+                log('OpenVidu inicializado');
+
+                const newSessionId = await initializeSession();
+                const token = await getToken(newSessionId, 'PUBLISHER');
+
+                session = OV.initSession();
+                log('Sessão OpenVidu inicializada');
+
+                session.on('streamCreated', (event) => {
+                    log('Stream criado: ' + event.stream.streamId);
+                });
+
+                session.on('streamDestroyed', (event) => {
+                    log('Stream destruído: ' + event.stream.streamId);
+                });
+
+                session.on('exception', (exception) => {
+                    log('Exceção: ' + exception.message, true);
+                });
+
+                await session.connect(token);
+                log('Conectado à sessão');
+
+                const publisher = await OV.initPublisher('video-container');
+                log('Publisher inicializado');
+
+                await session.publish(publisher);
+                log('Stream publicado com sucesso');
+            } catch (error) {
+                log(`Erro: ${error.message}`, true);
+                console.error('Error:', error);
+            }
+        });
+
+        // ... resto do código do viewer permanece o mesmo ...
+    </script>
+</body>
+</html> 

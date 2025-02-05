@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenVidu Broadcast Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/openvidu-browser@2.28.0/static/js/openvidu-browser-2.28.0.min.js"></script>
+    <style>
+        #video-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        video {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="video-container"></div>
+    <button id="start">Start Broadcasting</button>
+    <button id="watch">Watch Stream</button>
+
+    <script>
+        const OV = new OpenVidu();
+        let session;
+
+        document.getElementById('start').addEventListener('click', async () => {
+            try {
+                // Criar sessão
+                const response = await fetch('/api/sessions', { method: 'POST' });
+                const { sessionId } = await response.json();
+
+                // Obter token para broadcaster
+                const tokenResponse = await fetch(`/api/sessions/${sessionId}/connections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role: 'PUBLISHER' })
+                });
+                const { token } = await tokenResponse.json();
+
+                // Iniciar sessão
+                session = OV.initSession();
+                await session.connect(token);
+
+                // Publicar stream
+                const publisher = await OV.initPublisher('video-container');
+                await session.publish(publisher);
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        });
+
+        document.getElementById('watch').addEventListener('click', async () => {
+            try {
+                // Obter sessionId ativo (em produção, você precisaria de uma forma de compartilhar isso)
+                const response = await fetch('/api/sessions', { method: 'POST' });
+                const { sessionId } = await response.json();
+
+                // Obter token para viewer
+                const tokenResponse = await fetch(`/api/sessions/${sessionId}/connections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role: 'SUBSCRIBER' })
+                });
+                const { token } = await tokenResponse.json();
+
+                // Iniciar sessão
+                session = OV.initSession();
+                
+                session.on('streamCreated', (event) => {
+                    session.subscribe(event.stream, 'video-container');
+                });
+
+                await session.connect(token);
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        });
+    </script>
+</body>
+</html> 

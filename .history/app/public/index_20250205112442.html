@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenVidu Broadcast Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/openvidu-browser@2.28.0/static/js/openvidu-browser-2.28.0.min.js"></script>
+    <style>
+        #video-container {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            margin-bottom: 20px;
+        }
+        video {
+            width: 100%;
+        }
+        #log {
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border: 1px solid #ddd;
+            min-height: 100px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .error { color: red; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <div id="video-container"></div>
+    <button id="start">Start Broadcasting</button>
+    <button id="watch">Watch Stream</button>
+    <div id="log"></div>
+
+    <script>
+        const OV = new OpenVidu();
+        let session;
+
+        function log(message, isError = false) {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            entry.className = isError ? 'error' : 'success';
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        document.getElementById('start').addEventListener('click', async () => {
+            try {
+                log('Solicitando permissões de mídia...');
+                const devices = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+                log('Permissões de mídia concedidas');
+
+                log('Criando nova sessão...');
+                const response = await fetch('/api/sessions', { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const { sessionId } = await response.json();
+                log(`Sessão criada com ID: ${sessionId}`);
+
+                log('Obtendo token para broadcaster...');
+                const tokenResponse = await fetch(`/api/sessions/${sessionId}/connections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role: 'PUBLISHER' })
+                });
+
+                if (!tokenResponse.ok) {
+                    throw new Error(`HTTP error! status: ${tokenResponse.status}`);
+                }
+
+                const { token } = await tokenResponse.json();
+                log('Token obtido com sucesso');
+
+                session = OV.initSession();
+                
+                session.on('streamCreated', (event) => {
+                    log('Stream criado: ' + event.stream.streamId);
+                });
+
+                session.on('streamDestroyed', (event) => {
+                    log('Stream destruído: ' + event.stream.streamId);
+                });
+
+                session.on('exception', (exception) => {
+                    log('Exceção: ' + exception.message, true);
+                });
+
+                log('Conectando à sessão...');
+                await session.connect(token);
+                log('Conectado à sessão');
+
+                log('Inicializando publisher...');
+                const publisher = await OV.initPublisher('video-container', {
+                    audioSource: undefined,
+                    videoSource: undefined,
+                    publishAudio: true,
+                    publishVideo: true,
+                    resolution: '640x480',
+                    frameRate: 30,
+                    insertMode: 'APPEND',
+                    mirror: false
+                });
+                
+                log('Publisher inicializado, publicando stream...');
+                await session.publish(publisher);
+                log('Stream publicado com sucesso!');
+                
+            } catch (error) {
+                log('Erro: ' + error.message, true);
+                console.error('Error:', error);
+            }
+        });
+
+        document.getElementById('watch').addEventListener('click', async () => {
+            try {
+                // Obter sessionId ativo (em produção, você precisaria de uma forma de compartilhar isso)
+                const response = await fetch('/api/sessions', { method: 'POST' });
+                const { sessionId } = await response.json();
+
+                // Obter token para viewer
+                const tokenResponse = await fetch(`/api/sessions/${sessionId}/connections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role: 'SUBSCRIBER' })
+                });
+                const { token } = await tokenResponse.json();
+
+                // Iniciar sessão
+                session = OV.initSession();
+                
+                session.on('streamCreated', (event) => {
+                    session.subscribe(event.stream, 'video-container');
+                });
+
+                await session.connect(token);
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        });
+    </script>
+</body>
+</html> 

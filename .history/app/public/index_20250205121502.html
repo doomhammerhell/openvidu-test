@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenVidu Broadcasting</title>
+    <script src="https://cdn.jsdelivr.net/npm/openvidu-browser@2.28.0/static/js/openvidu-browser-2.28.0.min.js"></script>
+    <style>
+        #video-container { 
+            width: 70%;
+            margin: 0 auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+        }
+        #video-container video {
+            width: 100%;
+        }
+        .button-container {
+            text-align: center;
+            margin: 20px;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+        }
+        #status {
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <div id="video-container"></div>
+    <div class="button-container">
+        <button id="broadcast">Start Broadcasting</button>
+        <button id="watch">Watch Broadcast</button>
+    </div>
+    <div id="status"></div>
+
+    <script>
+        let OV;
+        let session;
+        let currentSessionId;
+
+        function updateStatus(message) {
+            document.getElementById('status').innerHTML += `<p>${new Date().toLocaleTimeString()}: ${message}</p>`;
+        }
+
+        async function initializeSession(role) {
+            try {
+                OV = new OpenVidu();
+                updateStatus('OpenVidu initialized');
+
+                // Create session
+                const response = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json();
+                if (!data.sessionId) throw new Error('No session ID received');
+                currentSessionId = data.sessionId;
+                updateStatus(`Session created: ${currentSessionId}`);
+
+                // Get token
+                const tokenResponse = await fetch(`/api/sessions/${currentSessionId}/connections`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const tokenData = await tokenResponse.json();
+                if (!tokenData.token) throw new Error('No token received');
+                updateStatus('Token received');
+
+                // Initialize session
+                session = OV.initSession();
+                updateStatus('Session initialized');
+
+                if (role === 'publisher') {
+                    // Publisher specific events
+                    session.on('streamCreated', (event) => {
+                        updateStatus('Stream created');
+                    });
+
+                    // Connect to session
+                    await session.connect(tokenData.token);
+                    updateStatus('Connected to session');
+
+                    // Initialize publisher
+                    const publisher = await OV.initPublisher('video-container', {
+                        audioSource: undefined,
+                        videoSource: undefined,
+                        publishAudio: true,
+                        publishVideo: true,
+                        resolution: '640x480',
+                        frameRate: 30,
+                        insertMode: 'APPEND',
+                        mirror: false
+                    });
+                    updateStatus('Publisher initialized');
+
+                    // Publish stream
+                    await session.publish(publisher);
+                    updateStatus('Stream published');
+                } else {
+                    // Subscriber specific events
+                    session.on('streamCreated', (event) => {
+                        updateStatus('Stream available, subscribing...');
+                        session.subscribe(event.stream, 'video-container');
+                        updateStatus('Subscribed to stream');
+                    });
+
+                    // Connect to session
+                    await session.connect(tokenData.token);
+                    updateStatus('Connected as viewer');
+                }
+            } catch (error) {
+                updateStatus(`Error: ${error.message}`);
+                console.error(error);
+            }
+        }
+
+        document.getElementById('broadcast').addEventListener('click', () => {
+            initializeSession('publisher');
+        });
+
+        document.getElementById('watch').addEventListener('click', () => {
+            initializeSession('subscriber');
+        });
+    </script>
+</body>
+</html> 
